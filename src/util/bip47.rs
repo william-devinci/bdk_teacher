@@ -19,7 +19,7 @@ use bitcoin::consensus::encode::serialize;
 use bitcoin::hashes::{sha256, sha512, Hmac, HmacEngine};
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
-use bitcoin::secp256k1::scalar;
+use bitcoin::secp256k1::scalar::{self, OutOfRangeError};
 use bitcoin::util::base58;
 use bitcoin::util::bip32;
 use bitcoin::util::psbt;
@@ -379,12 +379,12 @@ impl<'w, D: BatchDatabase> Bip47Wallet<'w, D> {
         let mut pk = payment_code.derive(secp, 0);
         let mut sk = self.secret(&vec![bip32::ChildNumber::Normal { index }]);
 
-        pk.mul_assign(secp,  &scalar::Scalar::from(sk))?;
+        pk.mul_tweak(secp,  &scalar::Scalar::from(sk))?;
         let shared_secret = sha256::Hash::hash(&pk.serialize()[1..]);
         if let Err(_) = SecretKey::from_slice(&shared_secret) {
             return Ok(None);
         }
-        sk.add_assign( &scalar::Scalar::from(&shared_secret))?; //shared_secret to SecretKey
+        sk.add_tweak( &scalar::Scalar::from_be_bytes(shared_secret.into_inner())?)?; //shared_secret to SecretKey
 
         let wallet = Wallet::new(
             P2Pkh(bitcoin::PrivateKey {
@@ -673,6 +673,7 @@ pub enum Error {
     SecpKey(bitcoin::secp256k1::Error),
     Key(crate::keys::KeyError),
     Wallet(WalletError),
+    Scalar(scalar::OutOfRangeError)
 }
 
 // TODO: impl display, std::err
@@ -695,6 +696,12 @@ impl From<crate::keys::KeyError> for Error {
 impl From<WalletError> for Error {
     fn from(e: WalletError) -> Error {
         Error::Wallet(e)
+    }
+}
+
+impl From<OutOfRangeError> for Error {
+    fn from(e: OutOfRangeError) -> Error {
+        Error::Scalar(e)
     }
 }
 
